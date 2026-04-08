@@ -234,14 +234,18 @@ function Start-MouseMover {
         $cycle++
 
         if (Test-HumanMovedMouse) {
-            Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Human active — deferring, $((Format-RemainingTime)) left" -ForegroundColor Magenta
+                $ts = Get-Date -Format 'HH:mm:ss'
+            $rem = Format-RemainingTime
+            Write-Host "  [$ts] Human active - deferring, $rem left" -ForegroundColor Magenta
             Save-CursorPosition
             Wait-WithHumanCheck -Seconds 10
             continue
         }
 
         $moveFor = Get-Random -Minimum 3 -Maximum 6
-        Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Cycle $cycle moving ($moveFor s), $((Format-RemainingTime)) left" -ForegroundColor DarkCyan
+            $ts = Get-Date -Format 'HH:mm:ss'
+            $rem = Format-RemainingTime
+            Write-Host "  [$ts] Cycle $cycle moving (${moveFor}s), $rem left" -ForegroundColor DarkCyan
 
         $humanTookOver = $false
         $moveUntil = (Get-Date).AddSeconds($moveFor)
@@ -255,7 +259,8 @@ function Start-MouseMover {
         }
 
         if ($humanTookOver) {
-            Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Human took over mid-move — yielding" -ForegroundColor Magenta
+            $ts = Get-Date -Format 'HH:mm:ss'
+            Write-Host "  [$ts] Human took over mid-move - yielding" -ForegroundColor Magenta
             Save-CursorPosition
             Wait-WithHumanCheck -Seconds 10
             continue
@@ -266,7 +271,9 @@ function Start-MouseMover {
         Save-CursorPosition
 
         $pauseFor = Get-Random -Minimum 30 -Maximum 56
-        Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Pausing $pauseFor s, $((Format-RemainingTime)) left" -ForegroundColor Yellow
+            $ts = Get-Date -Format 'HH:mm:ss'
+            $rem = Format-RemainingTime
+            Write-Host "  [$ts] Pausing ${pauseFor}s, $rem left" -ForegroundColor Yellow
         Wait-WithHumanCheck -Seconds $pauseFor
     }
 
@@ -285,8 +292,8 @@ try {
 # SIG # Begin signature block
 # MIIcIwYJKoZIhvcNAQcCoIIcFDCCHBACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDlICBdj64Ab4Mh
-# L/kNPbcwCwS/KgfzQkGrEcDDc/eG9aCCFmAwggMiMIICCqADAgECAhAUQNiZp7Ch
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBsbIT7eR31lz0q
+# SyFfCU1gvFCV+ov/pEgtce35JIENOqCCFmAwggMiMIICCqADAgECAhAUQNiZp7Ch
 # vEqhbsquXu7GMA0GCSqGSIb3DQEBCwUAMCkxJzAlBgNVBAMMHkxvY2FsIE1vdXNl
 # IE1vdmVyIENvZGUgU2lnbmluZzAeFw0yNjAzMDQwMDQ1NDZaFw0yNzAzMDQwMTA1
 # NDZaMCkxJzAlBgNVBAMMHkxvY2FsIE1vdXNlIE1vdmVyIENvZGUgU2lnbmluZzCC
@@ -409,29 +416,29 @@ try {
 # BRUCAQEwPTApMScwJQYDVQQDDB5Mb2NhbCBNb3VzZSBNb3ZlciBDb2RlIFNpZ25p
 # bmcCEBRA2JmnsKG8SqFuyq5e7sYwDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGC
 # NwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgor
-# BgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgHrIzkByw
-# RUKwH/7RU4so9PKTGWIrEbMWJCqDMxJIGuMwDQYJKoZIhvcNAQEBBQAEggEAiJwT
-# kN4ONJvFUjqmSGdmA1j5f+6v58OBKeNzftpHJNI1S0jiPLa0L4VBYfERj00c7c4B
-# B6JrPo57pY2tZ5FE00l1ZH3l3aAKSG3+Ut5DqnKR0zFHSncMqzAlDhStl+1BOIs6
-# 3HpzrkMF9xiRRAvxwC8ieLtgL6vnMPT5UTIafG3yHIGlaT1k7tjW3fvWbeHtclg3
-# oaout9ocx4VgPP9X3WXiSYwEFMbnLuyuj14/hc+WV44SL9JsEhZgR6doi8KRAhA0
-# W4Igvafc4rHrlr5MbOFrQuQZHNw3De2zXmDl3X2h1GLKSZIWaI3RZ/XjoscudN4S
-# xxuO8PbLNznRt07o9qGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# BgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgo7rdbM9H
+# gaKlwhoOLF26g9HQ0SoCn1aEVLVyBDytw8MwDQYJKoZIhvcNAQEBBQAEggEAi20y
+# hngxOO09wzx1C75ox9Q7lQEnHMlhv5Nx0Gty8yomOd42Oij9IxwgEkxQv8TPSPKE
+# JIS33sSE7/B5ZEIL5XdzVsT0OX/IbathCNX5bt1r7xHM9CssD7D2x1D1p7s+NwIf
+# L5dhJabwYUnM0i3EizzDQEEWwuYsF2DiRb5Vjnk+yWyVCRXCJsbHb7KCRelRToa4
+# FJwB7fQx7JEGlXaGuLybSwG0g3UNUZAidy1BAbKXQKNOmJmcZkAqKpj8WVKsUat2
+# p2AuRlG9/QzJXs4xq+ioSICI9lXJxGXERgcorR91DXUR9XJDlWRc5Kz/HhUGezih
+# wfxHcSOQMgV9/w2cEqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA0MDgwNjU5
-# MDRaMC8GCSqGSIb3DQEJBDEiBCAkfjMdVsjZYcjd3LnOzpcPPjqyZY2EbbRb3LDs
-# hrP3zzANBgkqhkiG9w0BAQEFAASCAgBnLw7pBbVjZ9HGegb8qWtWhFZoWC2rTv2O
-# NdW5fdC8ivYARP0/RD5VWI1UExYBB+CYMLGD0sZFJm1SbRAcwhMTe6mewEGwFt95
-# 2bT+5f0IDbNfEo0WxxWTiUz7ddVrlC2nvVB3wXILdvXjcOK4fjH8Kxnv8Ero0B/L
-# wpu0Yroz7rHfv7Zg/6WrCm0M9C9GISdOyrcfRcqC+8yc12fRmBeeS3EzXm9qJ3AJ
-# f0uwxdQhwtXlUiz1qU5cexhb/u4XLLiOCLDB77pLp6LIYf3JNueg2aOyxdaU1K35
-# jLQhxoYPoDlrjRlSLbx/t745yQ2IDdp0sU7ffWdyZu1f1RdZNCLGHejQBIZh5lRc
-# oYwtrCZpggESI3r9DOBMtIktO+TPm2gN7hUu+qiyB2LAAbFvnlGqi+XuzGdfgYD7
-# t7Z9+IEv4E22ermsN9K26+gcTU966ph1Ep784yh6auFucEi9phX38Wm3Fw0aCrqt
-# VYlMlekyR55q3u6iJLx7aNkysZG60lo2bfvbYJf8VwiKL2eMN4DrJh1ozl62Sqx8
-# Sh/+9/rnIhBstX6Tfrl7+PlOPouUQAqj8Jbk+I87LAruVUqiFzDd3vz7KHXGhPHE
-# li2yt3egcjP8s08RXtcC/bVu+6UW7B0kuyLBV2rV2HpBkTmdoco2NRFAoCgFHSDJ
-# oEAxwFoEpw==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA0MDgwNzAy
+# NDlaMC8GCSqGSIb3DQEJBDEiBCCxQCeJpB4BnIJWGVVp/MiVd8F6I0i7zesnkWK2
+# JpwqfTANBgkqhkiG9w0BAQEFAASCAgBL27T7gh5JNpfSucGt6N6cf4IgSNIB91m5
+# sdFUybgq/ZF4kLSVksAbUJnQ/es85KlTwq+V8AMsYpCug/O36dH4RgRx2hmkVa8n
+# Qi2lV4Wh62GKHWiYs8p73lVaX8kFpudmI5J83526EnHbrf987n4LBOfEuC5RaIUe
+# adWb1U9Q2o0cbsoZ/+MDx3Wc+PnroTrzQcwqYypHRoFtcVzTuquo2PE9Txmpp6HH
+# 24lz8D1FCKg47UdJ+HW3p7n6yEBTlP8qdvNyrGyL+Q6+RNi+gpCymEkzxQhjRLeo
+# 2FVlIHDqoq7fznyu8CdErQX33gWJBqhS3B+FctDQtiCClAvUUzfVxnKgqvPDlYB1
+# VSEJAXMNrTIssO/D7x50WOlQd0/08uhJRUfHGOacEjP3TTYnUrJrAdu/te/V7jgN
+# oWTKw7ZsLpPcVEF80OtiDyIChWO9NkEpfNuXPSxjaMwS35VSHx0JP4Njw6PUBQej
+# CjDq+oUBbXNc3X+zmF+hGU0KyirzK3jTBXd9AHWOkEqE0X0E9FCxotT5nBGvCCAQ
+# f2ES1V5CmFp4b0i+JYe8DGtgb7L2xTH+YWEZbJcu4Y5gtquPZeTdr4EMeUyCqkk8
+# 5DFVrg/s083lpbcjgSWiaGykcfGov5Z7BWS7xItqXYDuM5NUwhp22zGs0FJ+Ikcv
+# KlpwO549dQ==
 # SIG # End signature block
