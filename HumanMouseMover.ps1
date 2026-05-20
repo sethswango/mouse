@@ -1,7 +1,8 @@
 <#
 .SYNOPSIS
     Locally generated mouse mover that keeps the session awake.
-    Detects human mouse activity and defers gracefully — never fights the user.
+    Detects human mouse activity and defers gracefully.
+    Designed for minimal log footprint (no tight polling loops).
 #>
 
 param(
@@ -41,6 +42,7 @@ Write-Host ""
 $nativeCode = @'
 using System;
 using System.Runtime.InteropServices;
+using System.Threading;
 
 public static class NativeMouse
 {
@@ -81,6 +83,9 @@ public static class NativeMouse
     public const uint ES_CONTINUOUS = 0x80000000;
     public const uint ES_SYSTEM_REQUIRED = 0x00000001;
     public const uint ES_DISPLAY_REQUIRED = 0x00000002;
+
+    // Use Thread.Sleep to avoid PowerShell cmdlet logging overhead
+    public static void SleepMs(int ms) { Thread.Sleep(ms); }
 }
 '@
 
@@ -92,25 +97,20 @@ try {
 
 $script:lastKnownX = -1
 $script:lastKnownY = -1
-
-function Get-CursorPosition {
-    $pos = New-Object NativeMouse+POINT
-    [void][NativeMouse]::GetCursorPos([ref]$pos)
-    return @{ X = [int]$pos.X; Y = [int]$pos.Y }
-}
+$script:cursorPoint = New-Object NativeMouse+POINT
 
 function Test-HumanMovedMouse {
     if ($script:lastKnownX -eq -1) { return $false }
-    $now = Get-CursorPosition
-    $dx = [Math]::Abs($now.X - $script:lastKnownX)
-    $dy = [Math]::Abs($now.Y - $script:lastKnownY)
+    [void][NativeMouse]::GetCursorPos([ref]$script:cursorPoint)
+    $dx = [Math]::Abs($script:cursorPoint.X - $script:lastKnownX)
+    $dy = [Math]::Abs($script:cursorPoint.Y - $script:lastKnownY)
     return ($dx -gt $HumanThresholdPx -or $dy -gt $HumanThresholdPx)
 }
 
 function Save-CursorPosition {
-    $pos = Get-CursorPosition
-    $script:lastKnownX = $pos.X
-    $script:lastKnownY = $pos.Y
+    [void][NativeMouse]::GetCursorPos([ref]$script:cursorPoint)
+    $script:lastKnownX = $script:cursorPoint.X
+    $script:lastKnownY = $script:cursorPoint.Y
 }
 
 function Get-ZoneBounds {
@@ -145,79 +145,37 @@ function Get-ZoneBounds {
     }
 }
 
-function Get-RandomPointInZone {
-    param([hashtable]$Zone)
-    $x = Get-Random -Minimum $Zone.Left -Maximum ($Zone.Left + $Zone.Width)
-    $y = Get-Random -Minimum $Zone.Top -Maximum ($Zone.Top + $Zone.Height)
-    return @{ X = [int]$x; Y = [int]$y }
-}
-
 function Move-Smooth {
-    param(
-        [int]$TargetX,
-        [int]$TargetY,
-        [int]$DurationMs = 700
-    )
+    param([int]$TargetX, [int]$TargetY)
 
-    $pos = New-Object NativeMouse+POINT
-    [void][NativeMouse]::GetCursorPos([ref]$pos)
-    $startX = [double]$pos.X
-    $startY = [double]$pos.Y
-    $steps = [Math]::Max(12, [int]($DurationMs / 16))
+    [void][NativeMouse]::GetCursorPos([ref]$script:cursorPoint)
+    $startX = [double]$script:cursorPoint.X
+    $startY = [double]$script:cursorPoint.Y
+    $steps = 15
 
     for ($i = 1; $i -le $steps; $i++) {
-        if (Test-HumanMovedMouse) { return $false }
+        if (($i % 5) -eq 0 -and (Test-HumanMovedMouse)) { return $false }
 
         $t = [double]$i / [double]$steps
         $ease = $t * $t * (3 - 2 * $t)
-        $jitterX = (Get-Random -Minimum -1.0 -Maximum 1.0) * 0.35
-        $jitterY = (Get-Random -Minimum -1.0 -Maximum 1.0) * 0.35
-        $nextX = [int]($startX + (($TargetX - $startX) * $ease) + $jitterX)
-        $nextY = [int]($startY + (($TargetY - $startY) * $ease) + $jitterY)
+        $nextX = [int]($startX + (($TargetX - $startX) * $ease))
+        $nextY = [int]($startY + (($TargetY - $startY) * $ease))
         [void][NativeMouse]::SetCursorPos($nextX, $nextY)
         $script:lastKnownX = $nextX
         $script:lastKnownY = $nextY
-        Start-Sleep -Milliseconds 16
+        [NativeMouse]::SleepMs(50)
     }
     return $true
 }
 
-function Get-RemainingSeconds {
-    $elapsed = ((Get-Date) - $script:startTime).TotalSeconds
-    return [Math]::Max(0, $script:durationSeconds - [int][Math]::Floor($elapsed))
-}
-
-function Format-RemainingTime {
-    $remaining = Get-RemainingSeconds
-    $h = [Math]::Floor($remaining / 3600)
-    $m = [Math]::Floor(($remaining % 3600) / 60)
-    $s = $remaining % 60
-    if ($h -gt 0) { return "{0}h {1}m" -f $h, $m }
-    if ($m -gt 0) { return "{0}m {1}s" -f $m, $s }
-    return "{0}s" -f $s
-}
-
 function Test-TimeRemaining {
-    return (Get-RemainingSeconds) -gt 0
-}
-
-function Wait-WithHumanCheck {
-    param([int]$Seconds)
-    $deadline = (Get-Date).AddSeconds($Seconds)
-    while ((Get-Date) -lt $deadline -and (Test-TimeRemaining)) {
-        Start-Sleep -Milliseconds 500
-        [void][NativeMouse]::SetThreadExecutionState(
-            [NativeMouse]::ES_CONTINUOUS -bor
-            [NativeMouse]::ES_SYSTEM_REQUIRED -bor
-            [NativeMouse]::ES_DISPLAY_REQUIRED
-        )
-    }
+    return ((Get-Date) -lt $script:endTime)
 }
 
 function Start-MouseMover {
     $zone = Get-ZoneBounds
     Write-Host "  Zone: $($zone.Width)x$($zone.Height) near this window" -ForegroundColor Gray
-    Write-Host "  Pattern: move 3-5s, pause 30-55s, human override aware" -ForegroundColor Gray
+    Write-Host "  Pattern: brief move, pause 2-4 min, human override aware" -ForegroundColor Gray
     Write-Host "  Press Ctrl+C to stop early." -ForegroundColor Yellow
     Write-Host ""
 
@@ -234,47 +192,32 @@ function Start-MouseMover {
         $cycle++
 
         if (Test-HumanMovedMouse) {
-                $ts = Get-Date -Format 'HH:mm:ss'
-            $rem = Format-RemainingTime
-            Write-Host "  [$ts] Human active - deferring, $rem left" -ForegroundColor Magenta
+            Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Human active - deferring" -ForegroundColor Magenta
             Save-CursorPosition
-            Wait-WithHumanCheck -Seconds 10
+            Start-Sleep -Seconds 30
             continue
         }
 
-        $moveFor = Get-Random -Minimum 3 -Maximum 6
-            $ts = Get-Date -Format 'HH:mm:ss'
-            $rem = Format-RemainingTime
-            Write-Host "  [$ts] Cycle $cycle moving (${moveFor}s), $rem left" -ForegroundColor DarkCyan
+        $targetX = Get-Random -Minimum $zone.Left -Maximum ($zone.Left + $zone.Width)
+        $targetY = Get-Random -Minimum $zone.Top -Maximum ($zone.Top + $zone.Height)
 
-        $humanTookOver = $false
-        $moveUntil = (Get-Date).AddSeconds($moveFor)
-        while ((Get-Date) -lt $moveUntil -and (Test-TimeRemaining)) {
-            $point = Get-RandomPointInZone -Zone $zone
-            $completed = Move-Smooth -TargetX $point.X -TargetY $point.Y -DurationMs (Get-Random -Minimum 550 -Maximum 1050)
-            if ($completed -eq $false) {
-                $humanTookOver = $true
-                break
-            }
-        }
+        $elapsed = [Math]::Round(($script:durationSeconds - ((Get-Date) - $script:startTime).TotalSeconds) / 60)
+        Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Cycle $cycle, ~${elapsed}m left" -ForegroundColor DarkCyan
 
-        if ($humanTookOver) {
-            $ts = Get-Date -Format 'HH:mm:ss'
-            Write-Host "  [$ts] Human took over mid-move - yielding" -ForegroundColor Magenta
+        $completed = Move-Smooth -TargetX $targetX -TargetY $targetY
+
+        if ($completed -eq $false) {
+            Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Human took over - yielding" -ForegroundColor Magenta
             Save-CursorPosition
-            Wait-WithHumanCheck -Seconds 10
+            Start-Sleep -Seconds 30
             continue
         }
 
         if (-not (Test-TimeRemaining)) { break }
 
         Save-CursorPosition
-
-        $pauseFor = Get-Random -Minimum 30 -Maximum 56
-            $ts = Get-Date -Format 'HH:mm:ss'
-            $rem = Format-RemainingTime
-            Write-Host "  [$ts] Pausing ${pauseFor}s, $rem left" -ForegroundColor Yellow
-        Wait-WithHumanCheck -Seconds $pauseFor
+        $pauseFor = Get-Random -Minimum 120 -Maximum 240
+        Start-Sleep -Seconds $pauseFor
     }
 
     Write-Host ""
@@ -292,8 +235,8 @@ try {
 # SIG # Begin signature block
 # MIIcIwYJKoZIhvcNAQcCoIIcFDCCHBACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBsbIT7eR31lz0q
-# SyFfCU1gvFCV+ov/pEgtce35JIENOqCCFmAwggMiMIICCqADAgECAhAUQNiZp7Ch
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBwt/uePeC2WrQK
+# u8caPSpE2HnTP9P1u1Hwfe5CJ8u3f6CCFmAwggMiMIICCqADAgECAhAUQNiZp7Ch
 # vEqhbsquXu7GMA0GCSqGSIb3DQEBCwUAMCkxJzAlBgNVBAMMHkxvY2FsIE1vdXNl
 # IE1vdmVyIENvZGUgU2lnbmluZzAeFw0yNjAzMDQwMDQ1NDZaFw0yNzAzMDQwMTA1
 # NDZaMCkxJzAlBgNVBAMMHkxvY2FsIE1vdXNlIE1vdmVyIENvZGUgU2lnbmluZzCC
@@ -416,29 +359,29 @@ try {
 # BRUCAQEwPTApMScwJQYDVQQDDB5Mb2NhbCBNb3VzZSBNb3ZlciBDb2RlIFNpZ25p
 # bmcCEBRA2JmnsKG8SqFuyq5e7sYwDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGC
 # NwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgor
-# BgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgo7rdbM9H
-# gaKlwhoOLF26g9HQ0SoCn1aEVLVyBDytw8MwDQYJKoZIhvcNAQEBBQAEggEAi20y
-# hngxOO09wzx1C75ox9Q7lQEnHMlhv5Nx0Gty8yomOd42Oij9IxwgEkxQv8TPSPKE
-# JIS33sSE7/B5ZEIL5XdzVsT0OX/IbathCNX5bt1r7xHM9CssD7D2x1D1p7s+NwIf
-# L5dhJabwYUnM0i3EizzDQEEWwuYsF2DiRb5Vjnk+yWyVCRXCJsbHb7KCRelRToa4
-# FJwB7fQx7JEGlXaGuLybSwG0g3UNUZAidy1BAbKXQKNOmJmcZkAqKpj8WVKsUat2
-# p2AuRlG9/QzJXs4xq+ioSICI9lXJxGXERgcorR91DXUR9XJDlWRc5Kz/HhUGezih
-# wfxHcSOQMgV9/w2cEqGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# BgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg8s1k/pgN
+# MqkYZYVgSo55VC5aPvZYs65boBAP4kUK620wDQYJKoZIhvcNAQEBBQAEggEAvI3U
+# jZXOeoGhwn5ZQiWMiY6NrZxTCrqHBAJ0admpjxkD32IY43vAdOcEW3HUU6h+Dbod
+# 7WfNjxBhQqXhknz/aOev5gOwxbkxFi/FoY0Z4HP/BglDkdzsa4xA2HLf8uACuGPI
+# 29w01ZlZq/KrFi7FYoMXv4vGCZVEJDrGoYZ9urnLNBMtuEC4++3R8w/POz3J3LEz
+# /y2X66DwJirBsRDZ8N4LekMvipvt/10OJ+B3Fc5ZRP0StDZRUUp04QawOYHQO6J8
+# nBE44iXGTM9FyEREdY3Pc27BR/aCg8funbspCsOpROYGBf9qlmKth8CUd7qf9DlG
+# 3lgrVDE4ULoTZknYsaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA0MDgwNzAy
-# NDlaMC8GCSqGSIb3DQEJBDEiBCCxQCeJpB4BnIJWGVVp/MiVd8F6I0i7zesnkWK2
-# JpwqfTANBgkqhkiG9w0BAQEFAASCAgBL27T7gh5JNpfSucGt6N6cf4IgSNIB91m5
-# sdFUybgq/ZF4kLSVksAbUJnQ/es85KlTwq+V8AMsYpCug/O36dH4RgRx2hmkVa8n
-# Qi2lV4Wh62GKHWiYs8p73lVaX8kFpudmI5J83526EnHbrf987n4LBOfEuC5RaIUe
-# adWb1U9Q2o0cbsoZ/+MDx3Wc+PnroTrzQcwqYypHRoFtcVzTuquo2PE9Txmpp6HH
-# 24lz8D1FCKg47UdJ+HW3p7n6yEBTlP8qdvNyrGyL+Q6+RNi+gpCymEkzxQhjRLeo
-# 2FVlIHDqoq7fznyu8CdErQX33gWJBqhS3B+FctDQtiCClAvUUzfVxnKgqvPDlYB1
-# VSEJAXMNrTIssO/D7x50WOlQd0/08uhJRUfHGOacEjP3TTYnUrJrAdu/te/V7jgN
-# oWTKw7ZsLpPcVEF80OtiDyIChWO9NkEpfNuXPSxjaMwS35VSHx0JP4Njw6PUBQej
-# CjDq+oUBbXNc3X+zmF+hGU0KyirzK3jTBXd9AHWOkEqE0X0E9FCxotT5nBGvCCAQ
-# f2ES1V5CmFp4b0i+JYe8DGtgb7L2xTH+YWEZbJcu4Y5gtquPZeTdr4EMeUyCqkk8
-# 5DFVrg/s083lpbcjgSWiaGykcfGov5Z7BWS7xItqXYDuM5NUwhp22zGs0FJ+Ikcv
-# KlpwO549dQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA1MjAxNDU1
+# MThaMC8GCSqGSIb3DQEJBDEiBCDWSJdl8OSpWESPmiB1hqDtvFufSz8tSM9dRMUB
+# vxfVWDANBgkqhkiG9w0BAQEFAASCAgBi2aP5gFr/Je0OL8O5bY88Vkw9HxtZzZZN
+# F4UGGZ9hW6jiLbhq1XdcG34urvik1Kg7stjIm4hry7yUf98YJ2XVj2qbOVrJ/9cc
+# bWuvmF1WjCP41gtJPt37ipjyIes+U57cnYPN+G1K+crmS2GPRY+QTV/G6Ki2fKq9
+# eoiBTHYKjXH4/u8cYpSRL96VM93wmqeixft/M/ZdtVyJeEa5AFm/ke0pRKMHzf9T
+# VxbN7KMgE2jh4BEt2NSjXdL9Km322R1EswTPcnoZkNkisxqboIWsBHwuvYB4oOTs
+# rAKQ7N9eZRX89mgFE9argUnRlCGwDkVEVsJnYyD8IfpI8XAxuILZiQjOInVuhngh
+# F1hQa4qFaY/R9Db9y/uYhCZhmajlQLOz/+a29pPDHQuji2qn92E6htM5K7lc00o7
+# NcNLpd4Ydd+FuvfOcWFrgqlug1vUXhojqTIKCPIHSK3pBzxx32nHWCjZWALQO3zp
+# jZIxmPd1JZeS4nZTmCfwcWBO7kMXGGzRl3ZDo0AbRsIAzQ88If9YAUuhofvm8WtO
+# q8CmRX+z10uv+TmvySLzZlC5zNgi7bQMVnk0VDiGumRBY97Skdz15LfEDEDwcJzN
+# 280P4/linzaWw/nNDK/w7B97xlIVaupWaRG59vW/eR7tQh9iU19JkQTSO5El1bMn
+# fDkghCbXoA==
 # SIG # End signature block
