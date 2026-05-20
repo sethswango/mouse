@@ -1,8 +1,8 @@
 <#
 .SYNOPSIS
     Locally generated mouse mover that keeps the session awake.
-    All operational logic runs as compiled .NET to avoid PowerShell command logging.
-    Only the shell (prompt + banner) generates PS log entries.
+    Detects human mouse activity and defers gracefully.
+    Designed for minimal log footprint (no tight polling loops).
 #>
 
 param(
@@ -22,228 +22,221 @@ Write-Host ""
 
 $durationInput = Read-Host "  Duration in hours [default 0.5]"
 if ([string]::IsNullOrWhiteSpace($durationInput)) {
-    $durationHours = 0.5
+    $script:durationHours = 0.5
 } else {
     try {
-        $durationHours = [double]$durationInput
-        if ($durationHours -le 0) { $durationHours = 0.5 }
+        $script:durationHours = [double]$durationInput
+        if ($script:durationHours -le 0) { $script:durationHours = 0.5 }
     } catch {
-        $durationHours = 0.5
+        $script:durationHours = 0.5
     }
 }
 
-$endTime = (Get-Date).AddHours($durationHours)
-Write-Host "  Running for $durationHours hour(s), until $($endTime.ToString('h:mm:ss tt'))" -ForegroundColor Green
+$script:startTime = Get-Date
+$script:durationSeconds = [Math]::Round($script:durationHours * 3600)
+$script:endTime = $script:startTime.AddSeconds($script:durationSeconds)
+
+Write-Host "  Running for $($script:durationHours) hour(s), until $($script:endTime.ToString('h:mm:ss tt'))" -ForegroundColor Green
 Write-Host ""
 
-$moverCode = @'
+$nativeCode = @'
 using System;
 using System.Runtime.InteropServices;
 using System.Threading;
 
-public static class MouseMover
+public static class NativeMouse
 {
     [StructLayout(LayoutKind.Sequential)]
-    public struct POINT { public int X; public int Y; }
+    public struct POINT
+    {
+        public int X;
+        public int Y;
+    }
 
     [StructLayout(LayoutKind.Sequential)]
-    public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+    public struct RECT
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
 
     [DllImport("user32.dll")]
-    private static extern bool GetCursorPos(out POINT lpPoint);
+    public static extern bool GetCursorPos(out POINT lpPoint);
 
     [DllImport("user32.dll")]
-    private static extern bool SetCursorPos(int X, int Y);
+    public static extern bool SetCursorPos(int X, int Y);
 
     [DllImport("user32.dll")]
-    private static extern int GetSystemMetrics(int nIndex);
+    public static extern int GetSystemMetrics(int nIndex);
 
     [DllImport("kernel32.dll")]
-    private static extern IntPtr GetConsoleWindow();
+    public static extern IntPtr GetConsoleWindow();
 
     [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+    public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
 
     [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-    private static extern uint SetThreadExecutionState(uint esFlags);
+    public static extern uint SetThreadExecutionState(uint esFlags);
 
-    private const uint ES_CONTINUOUS = 0x80000000;
-    private const uint ES_SYSTEM_REQUIRED = 0x00000001;
-    private const uint ES_DISPLAY_REQUIRED = 0x00000002;
+    public const uint ES_CONTINUOUS = 0x80000000;
+    public const uint ES_SYSTEM_REQUIRED = 0x00000001;
+    public const uint ES_DISPLAY_REQUIRED = 0x00000002;
 
-    private static Random rng = new Random();
-    private static int lastKnownX = -1;
-    private static int lastKnownY = -1;
-    private static int humanThreshold = 8;
-
-    private static int zoneLeft;
-    private static int zoneTop;
-    private static int zoneWidth;
-    private static int zoneHeight;
-
-    public static void Run(double durationSeconds, int configZoneWidth, int configZoneHeight, int configZonePadding, int configHumanThreshold)
-    {
-        humanThreshold = configHumanThreshold;
-        DateTime endTime = DateTime.Now.AddSeconds(durationSeconds);
-
-        SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED);
-        ComputeZone(configZoneWidth, configZoneHeight, configZonePadding);
-        SaveCursorPosition();
-
-        Console.ForegroundColor = ConsoleColor.Gray;
-        Console.WriteLine("  Zone: " + zoneWidth + "x" + zoneHeight + " near this window");
-        Console.WriteLine("  Pattern: brief move, pause 2-4 min, human override aware");
-        Console.ForegroundColor = ConsoleColor.Yellow;
-        Console.WriteLine("  Press Ctrl+C to stop early.");
-        Console.ResetColor();
-        Console.WriteLine();
-
-        int cycle = 0;
-        try
-        {
-            while (DateTime.Now < endTime)
-            {
-                cycle++;
-
-                if (HumanMovedMouse())
-                {
-                    int remMin = (int)((endTime - DateTime.Now).TotalMinutes);
-                    Console.ForegroundColor = ConsoleColor.Magenta;
-                    Console.WriteLine("  [" + DateTime.Now.ToString("HH:mm:ss") + "] Human active - deferring, ~" + remMin + "m left");
-                    Console.ResetColor();
-                    SaveCursorPosition();
-                    Thread.Sleep(30000);
-                    continue;
-                }
-
-                int remMin2 = (int)((endTime - DateTime.Now).TotalMinutes);
-                Console.ForegroundColor = ConsoleColor.DarkCyan;
-                Console.WriteLine("  [" + DateTime.Now.ToString("HH:mm:ss") + "] Cycle " + cycle + ", ~" + remMin2 + "m left");
-                Console.ResetColor();
-
-                int targetX = rng.Next(zoneLeft, zoneLeft + zoneWidth);
-                int targetY = rng.Next(zoneTop, zoneTop + zoneHeight);
-
-                bool completed = MoveSmooth(targetX, targetY);
-
-                if (!completed)
-                {
-                    Console.ForegroundColor = ConsoleColor.Magenta;
-                    Console.WriteLine("  [" + DateTime.Now.ToString("HH:mm:ss") + "] Human took over - yielding");
-                    Console.ResetColor();
-                    SaveCursorPosition();
-                    Thread.Sleep(30000);
-                    continue;
-                }
-
-                if (DateTime.Now >= endTime) break;
-
-                SaveCursorPosition();
-                int pauseMs = rng.Next(120000, 240001);
-                Thread.Sleep(pauseMs);
-            }
-        }
-        finally
-        {
-            SetThreadExecutionState(ES_CONTINUOUS);
-        }
-
-        Console.WriteLine();
-        Console.ForegroundColor = ConsoleColor.Green;
-        Console.WriteLine("  Finished. Duration complete.");
-        Console.ForegroundColor = ConsoleColor.Gray;
-        Console.WriteLine("  Sleep settings restored.");
-        Console.ResetColor();
-        Console.WriteLine();
-    }
-
-    private static void ComputeZone(int configWidth, int configHeight, int padding)
-    {
-        int screenWidth = GetSystemMetrics(0);
-        int screenHeight = GetSystemMetrics(1);
-        zoneLeft = 100;
-        zoneTop = 100;
-        zoneWidth = Math.Min(configWidth, Math.Max(80, screenWidth - 200));
-        zoneHeight = Math.Min(configHeight, Math.Max(60, screenHeight - 200));
-
-        try
-        {
-            IntPtr hwnd = GetConsoleWindow();
-            if (hwnd != IntPtr.Zero)
-            {
-                RECT rect;
-                if (GetWindowRect(hwnd, out rect))
-                {
-                    zoneLeft = rect.Left + padding;
-                    zoneTop = rect.Top + padding;
-                    int maxW = (rect.Right - rect.Left) - (padding * 2);
-                    int maxH = (rect.Bottom - rect.Top) - (padding * 2);
-                    zoneWidth = Math.Max(80, Math.Min(configWidth, maxW));
-                    zoneHeight = Math.Max(60, Math.Min(configHeight, maxH));
-                }
-            }
-        }
-        catch { }
-    }
-
-    private static bool MoveSmooth(int targetX, int targetY)
-    {
-        POINT pos;
-        GetCursorPos(out pos);
-        double startX = pos.X;
-        double startY = pos.Y;
-        int steps = 15;
-
-        for (int i = 1; i <= steps; i++)
-        {
-            if (i % 5 == 0 && HumanMovedMouse()) return false;
-
-            double t = (double)i / steps;
-            double ease = t * t * (3.0 - 2.0 * t);
-            int nextX = (int)(startX + ((targetX - startX) * ease));
-            int nextY = (int)(startY + ((targetY - startY) * ease));
-            SetCursorPos(nextX, nextY);
-            lastKnownX = nextX;
-            lastKnownY = nextY;
-            Thread.Sleep(50);
-        }
-        return true;
-    }
-
-    private static bool HumanMovedMouse()
-    {
-        if (lastKnownX == -1) return false;
-        POINT pos;
-        GetCursorPos(out pos);
-        int dx = Math.Abs(pos.X - lastKnownX);
-        int dy = Math.Abs(pos.Y - lastKnownY);
-        return (dx > humanThreshold || dy > humanThreshold);
-    }
-
-    private static void SaveCursorPosition()
-    {
-        POINT pos;
-        GetCursorPos(out pos);
-        lastKnownX = pos.X;
-        lastKnownY = pos.Y;
-    }
+    // Use Thread.Sleep to avoid PowerShell cmdlet logging overhead
+    public static void SleepMs(int ms) { Thread.Sleep(ms); }
 }
 '@
 
 try {
-    Add-Type -TypeDefinition $moverCode -ErrorAction Stop
+    Add-Type -TypeDefinition $nativeCode -ErrorAction Stop
 } catch {
     if ($_.Exception.Message -notlike "*already exists*") { throw }
 }
 
-$durationSeconds = [Math]::Round($durationHours * 3600)
-[MouseMover]::Run($durationSeconds, $ZoneWidth, $ZoneHeight, $ZonePadding, $HumanThresholdPx)
+$script:lastKnownX = -1
+$script:lastKnownY = -1
+$script:cursorPoint = New-Object NativeMouse+POINT
+
+function Test-HumanMovedMouse {
+    if ($script:lastKnownX -eq -1) { return $false }
+    [void][NativeMouse]::GetCursorPos([ref]$script:cursorPoint)
+    $dx = [Math]::Abs($script:cursorPoint.X - $script:lastKnownX)
+    $dy = [Math]::Abs($script:cursorPoint.Y - $script:lastKnownY)
+    return ($dx -gt $HumanThresholdPx -or $dy -gt $HumanThresholdPx)
+}
+
+function Save-CursorPosition {
+    [void][NativeMouse]::GetCursorPos([ref]$script:cursorPoint)
+    $script:lastKnownX = $script:cursorPoint.X
+    $script:lastKnownY = $script:cursorPoint.Y
+}
+
+function Get-ZoneBounds {
+    $screenWidth = [NativeMouse]::GetSystemMetrics(0)
+    $screenHeight = [NativeMouse]::GetSystemMetrics(1)
+    $left = 100
+    $top = 100
+    $width = [Math]::Min($ZoneWidth, [Math]::Max(80, $screenWidth - 200))
+    $height = [Math]::Min($ZoneHeight, [Math]::Max(60, $screenHeight - 200))
+
+    try {
+        $hwnd = [NativeMouse]::GetConsoleWindow()
+        if ($hwnd -ne [IntPtr]::Zero) {
+            $rect = New-Object NativeMouse+RECT
+            if ([NativeMouse]::GetWindowRect($hwnd, [ref]$rect)) {
+                $left = $rect.Left + $ZonePadding
+                $top = $rect.Top + $ZonePadding
+                $maxWidth = ($rect.Right - $rect.Left) - ($ZonePadding * 2)
+                $maxHeight = ($rect.Bottom - $rect.Top) - ($ZonePadding * 2)
+                $width = [Math]::Max(80, [Math]::Min($ZoneWidth, $maxWidth))
+                $height = [Math]::Max(60, [Math]::Min($ZoneHeight, $maxHeight))
+            }
+        }
+    } catch {
+    }
+
+    return @{
+        Left = [int]$left
+        Top = [int]$top
+        Width = [int]$width
+        Height = [int]$height
+    }
+}
+
+function Move-Smooth {
+    param([int]$TargetX, [int]$TargetY)
+
+    [void][NativeMouse]::GetCursorPos([ref]$script:cursorPoint)
+    $startX = [double]$script:cursorPoint.X
+    $startY = [double]$script:cursorPoint.Y
+    $steps = 15
+
+    for ($i = 1; $i -le $steps; $i++) {
+        if (($i % 5) -eq 0 -and (Test-HumanMovedMouse)) { return $false }
+
+        $t = [double]$i / [double]$steps
+        $ease = $t * $t * (3 - 2 * $t)
+        $nextX = [int]($startX + (($TargetX - $startX) * $ease))
+        $nextY = [int]($startY + (($TargetY - $startY) * $ease))
+        [void][NativeMouse]::SetCursorPos($nextX, $nextY)
+        $script:lastKnownX = $nextX
+        $script:lastKnownY = $nextY
+        [NativeMouse]::SleepMs(50)
+    }
+    return $true
+}
+
+function Test-TimeRemaining {
+    return ((Get-Date) -lt $script:endTime)
+}
+
+function Start-MouseMover {
+    $zone = Get-ZoneBounds
+    Write-Host "  Zone: $($zone.Width)x$($zone.Height) near this window" -ForegroundColor Gray
+    Write-Host "  Pattern: brief move, pause 2-4 min, human override aware" -ForegroundColor Gray
+    Write-Host "  Press Ctrl+C to stop early." -ForegroundColor Yellow
+    Write-Host ""
+
+    [void][NativeMouse]::SetThreadExecutionState(
+        [NativeMouse]::ES_CONTINUOUS -bor
+        [NativeMouse]::ES_SYSTEM_REQUIRED -bor
+        [NativeMouse]::ES_DISPLAY_REQUIRED
+    )
+
+    Save-CursorPosition
+
+    $cycle = 0
+    while (Test-TimeRemaining) {
+        $cycle++
+
+        if (Test-HumanMovedMouse) {
+            Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Human active - deferring" -ForegroundColor Magenta
+            Save-CursorPosition
+            Start-Sleep -Seconds 30
+            continue
+        }
+
+        $targetX = Get-Random -Minimum $zone.Left -Maximum ($zone.Left + $zone.Width)
+        $targetY = Get-Random -Minimum $zone.Top -Maximum ($zone.Top + $zone.Height)
+
+        $elapsed = [Math]::Round(($script:durationSeconds - ((Get-Date) - $script:startTime).TotalSeconds) / 60)
+        Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Cycle $cycle, ~${elapsed}m left" -ForegroundColor DarkCyan
+
+        $completed = Move-Smooth -TargetX $targetX -TargetY $targetY
+
+        if ($completed -eq $false) {
+            Write-Host "  [$(Get-Date -Format 'HH:mm:ss')] Human took over - yielding" -ForegroundColor Magenta
+            Save-CursorPosition
+            Start-Sleep -Seconds 30
+            continue
+        }
+
+        if (-not (Test-TimeRemaining)) { break }
+
+        Save-CursorPosition
+        $pauseFor = Get-Random -Minimum 120 -Maximum 240
+        Start-Sleep -Seconds $pauseFor
+    }
+
+    Write-Host ""
+    Write-Host "  Finished. Duration complete." -ForegroundColor Green
+}
+
+try {
+    Start-MouseMover
+} finally {
+    [void][NativeMouse]::SetThreadExecutionState([NativeMouse]::ES_CONTINUOUS)
+    Write-Host "  Sleep settings restored." -ForegroundColor Gray
+    Write-Host ""
+}
 
 # SIG # Begin signature block
 # MIIcIwYJKoZIhvcNAQcCoIIcFDCCHBACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBYpUyd72VGtdp1
-# awQvbOA83WyA4y5L7vgjNNr1daQQHqCCFmAwggMiMIICCqADAgECAhAUQNiZp7Ch
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBwt/uePeC2WrQK
+# u8caPSpE2HnTP9P1u1Hwfe5CJ8u3f6CCFmAwggMiMIICCqADAgECAhAUQNiZp7Ch
 # vEqhbsquXu7GMA0GCSqGSIb3DQEBCwUAMCkxJzAlBgNVBAMMHkxvY2FsIE1vdXNl
 # IE1vdmVyIENvZGUgU2lnbmluZzAeFw0yNjAzMDQwMDQ1NDZaFw0yNzAzMDQwMTA1
 # NDZaMCkxJzAlBgNVBAMMHkxvY2FsIE1vdXNlIE1vdmVyIENvZGUgU2lnbmluZzCC
@@ -366,29 +359,29 @@ $durationSeconds = [Math]::Round($durationHours * 3600)
 # BRUCAQEwPTApMScwJQYDVQQDDB5Mb2NhbCBNb3VzZSBNb3ZlciBDb2RlIFNpZ25p
 # bmcCEBRA2JmnsKG8SqFuyq5e7sYwDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGC
 # NwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgor
-# BgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg2EvImVhd
-# AdJ1cZRzZ0avODE1iX2uV9h07n0xSnIbQ3EwDQYJKoZIhvcNAQEBBQAEggEAJLf5
-# dytVKfnRYoB5i8DF4AJcvs26rmYGbMWCyhv++iWB3UIRPtLvQ11st0J77fsS+nA9
-# oph4spl02FLTNTGvjC1VCI3rgVqUpLmXq/dkTSPHAYrhEretchGXDAKcu2KR8A+k
-# 5CrVo5WFSQRkjux3+WkTRkH12hJCbTOFllPrwBA4yCV7e2Hlh2fapmKTZMLyHJji
-# K2cVmCGLs/HiWNlSMsuw4cjg8VV0VqD5KjN5SYS9uV0m9WJ/c05gFM5V1po+ChMr
-# 1zdJXeDTB+hNadQRx+823o0vWquki62PyDYs3zBGLwT973JvOnAGAIgCE1BPoEr/
-# z3JXKhL85pgRpiEVC6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# BgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg8s1k/pgN
+# MqkYZYVgSo55VC5aPvZYs65boBAP4kUK620wDQYJKoZIhvcNAQEBBQAEggEAvI3U
+# jZXOeoGhwn5ZQiWMiY6NrZxTCrqHBAJ0admpjxkD32IY43vAdOcEW3HUU6h+Dbod
+# 7WfNjxBhQqXhknz/aOev5gOwxbkxFi/FoY0Z4HP/BglDkdzsa4xA2HLf8uACuGPI
+# 29w01ZlZq/KrFi7FYoMXv4vGCZVEJDrGoYZ9urnLNBMtuEC4++3R8w/POz3J3LEz
+# /y2X66DwJirBsRDZ8N4LekMvipvt/10OJ+B3Fc5ZRP0StDZRUUp04QawOYHQO6J8
+# nBE44iXGTM9FyEREdY3Pc27BR/aCg8funbspCsOpROYGBf9qlmKth8CUd7qf9DlG
+# 3lgrVDE4ULoTZknYsaGCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA1MjAxNTEx
-# MjFaMC8GCSqGSIb3DQEJBDEiBCAVddXpgbD9FPmhFws/72hibfKdrSiDqkZov3Ws
-# 7c0FpTANBgkqhkiG9w0BAQEFAASCAgBhoLg7RHb4SxhtpIbQWtX2wyCtD+anaUEY
-# I0u5aLhCdZof5WtksKkFH+FtDsji8iH6G9gsEHwE0vkJKtwPGeJkN067X+QSkFZ7
-# REQpqZ7eoD+gWliKU0fCC23zXsnbE11PvUtm/QIpYdc8DrN8nAt0f0nrjYuf4hRr
-# 0/9p+NqxXBNfguHuz2P5Am23uFtbh+yCMeFG5uKI838CjtCuoLHY5oFCe95jZ1LF
-# +Nuge9TBY4WBrTnud2fF3GIiZ62iixGMcwMmY0NlvHeFpk4fb4nv5OkN90/iER8G
-# HWH275TFhxUg4Pyh1g5fyK649ebgQQwCkXy9tlKRg069ucd9yjDrW/16NdaF5DhP
-# s7+7NjsUrZLIcoMiJTOJAjMS4nI5lGYNvSOvlYad/yHoX+PvcjwJc4Z2sVrBNd/C
-# xoDYLEkcsCaIC/CWl8LikTtUEQ6AjF2SfEpc9ahxuU5N8pfrQr/GYAKdcQnVKEMa
-# IwIfVNzHVAwZoNdZQKC+frlFs3N3O2WZXHiF7xm5AZPZXf5d8JiHRmRh+a2LXVf+
-# ckblVkIl6JRkX47E+o2p0eTqqQLSoLgR0+Iaoq3uP5lfGunnSje9NZBhHsVI9DNP
-# /k9zKH6OzbERJhDWwb95AnmsxsCKTXS/Xr18CEa159G+ej355EIu3Namy/p9Hfqz
-# JpgkiN4ETQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA1MjAxNDU1
+# MThaMC8GCSqGSIb3DQEJBDEiBCDWSJdl8OSpWESPmiB1hqDtvFufSz8tSM9dRMUB
+# vxfVWDANBgkqhkiG9w0BAQEFAASCAgBi2aP5gFr/Je0OL8O5bY88Vkw9HxtZzZZN
+# F4UGGZ9hW6jiLbhq1XdcG34urvik1Kg7stjIm4hry7yUf98YJ2XVj2qbOVrJ/9cc
+# bWuvmF1WjCP41gtJPt37ipjyIes+U57cnYPN+G1K+crmS2GPRY+QTV/G6Ki2fKq9
+# eoiBTHYKjXH4/u8cYpSRL96VM93wmqeixft/M/ZdtVyJeEa5AFm/ke0pRKMHzf9T
+# VxbN7KMgE2jh4BEt2NSjXdL9Km322R1EswTPcnoZkNkisxqboIWsBHwuvYB4oOTs
+# rAKQ7N9eZRX89mgFE9argUnRlCGwDkVEVsJnYyD8IfpI8XAxuILZiQjOInVuhngh
+# F1hQa4qFaY/R9Db9y/uYhCZhmajlQLOz/+a29pPDHQuji2qn92E6htM5K7lc00o7
+# NcNLpd4Ydd+FuvfOcWFrgqlug1vUXhojqTIKCPIHSK3pBzxx32nHWCjZWALQO3zp
+# jZIxmPd1JZeS4nZTmCfwcWBO7kMXGGzRl3ZDo0AbRsIAzQ88If9YAUuhofvm8WtO
+# q8CmRX+z10uv+TmvySLzZlC5zNgi7bQMVnk0VDiGumRBY97Skdz15LfEDEDwcJzN
+# 280P4/linzaWw/nNDK/w7B97xlIVaupWaRG59vW/eR7tQh9iU19JkQTSO5El1bMn
+# fDkghCbXoA==
 # SIG # End signature block
