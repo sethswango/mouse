@@ -92,7 +92,7 @@ public static class MouseMover
 
         Console.ForegroundColor = ConsoleColor.Gray;
         Console.WriteLine("  Zone: " + zoneWidth + "x" + zoneHeight + " near this window");
-        Console.WriteLine("  Pattern: brief move, pause 2-4 min, human override aware");
+        Console.WriteLine("  Pattern: brief move every ~30s, human override aware");
         Console.ForegroundColor = ConsoleColor.Yellow;
         Console.WriteLine("  Press Ctrl+C to stop early.");
         Console.ResetColor();
@@ -139,7 +139,7 @@ public static class MouseMover
                 if (DateTime.Now >= endTime) break;
 
                 SaveCursorPosition();
-                int pauseMs = rng.Next(120000, 240001);
+                int pauseMs = rng.Next(25000, 36001);
                 Thread.Sleep(pauseMs);
             }
         }
@@ -242,8 +242,8 @@ $durationSeconds = [Math]::Round($durationHours * 3600)
 # SIG # Begin signature block
 # MIIcIwYJKoZIhvcNAQcCoIIcFDCCHBACAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCBYpUyd72VGtdp1
-# awQvbOA83WyA4y5L7vgjNNr1daQQHqCCFmAwggMiMIICCqADAgECAhAUQNiZp7Ch
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCiBlImOZAOXNi3
+# ZDu0I+p9i/U5tUF0UepeG2F9qxBbIKCCFmAwggMiMIICCqADAgECAhAUQNiZp7Ch
 # vEqhbsquXu7GMA0GCSqGSIb3DQEBCwUAMCkxJzAlBgNVBAMMHkxvY2FsIE1vdXNl
 # IE1vdmVyIENvZGUgU2lnbmluZzAeFw0yNjAzMDQwMDQ1NDZaFw0yNzAzMDQwMTA1
 # NDZaMCkxJzAlBgNVBAMMHkxvY2FsIE1vdXNlIE1vdmVyIENvZGUgU2lnbmluZzCC
@@ -366,29 +366,29 @@ $durationSeconds = [Math]::Round($durationHours * 3600)
 # BRUCAQEwPTApMScwJQYDVQQDDB5Mb2NhbCBNb3VzZSBNb3ZlciBDb2RlIFNpZ25p
 # bmcCEBRA2JmnsKG8SqFuyq5e7sYwDQYJYIZIAWUDBAIBBQCggYQwGAYKKwYBBAGC
 # NwIBDDEKMAigAoAAoQKAADAZBgkqhkiG9w0BCQMxDAYKKwYBBAGCNwIBBDAcBgor
-# BgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQg2EvImVhd
-# AdJ1cZRzZ0avODE1iX2uV9h07n0xSnIbQ3EwDQYJKoZIhvcNAQEBBQAEggEAJLf5
-# dytVKfnRYoB5i8DF4AJcvs26rmYGbMWCyhv++iWB3UIRPtLvQ11st0J77fsS+nA9
-# oph4spl02FLTNTGvjC1VCI3rgVqUpLmXq/dkTSPHAYrhEretchGXDAKcu2KR8A+k
-# 5CrVo5WFSQRkjux3+WkTRkH12hJCbTOFllPrwBA4yCV7e2Hlh2fapmKTZMLyHJji
-# K2cVmCGLs/HiWNlSMsuw4cjg8VV0VqD5KjN5SYS9uV0m9WJ/c05gFM5V1po+ChMr
-# 1zdJXeDTB+hNadQRx+823o0vWquki62PyDYs3zBGLwT973JvOnAGAIgCE1BPoEr/
-# z3JXKhL85pgRpiEVC6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
+# BgEEAYI3AgELMQ4wDAYKKwYBBAGCNwIBFTAvBgkqhkiG9w0BCQQxIgQgaCDT4YBS
+# hgxUJAo2xQ3RZNWUelnBMwmIxl3M1cIT2QcwDQYJKoZIhvcNAQEBBQAEggEAA3zB
+# 8gxnfxB/zoHw6N8EqVhI3bWN6IP5z+5tT+BRmZchdYzTv1BD0cEL0pdn9xGcUB6U
+# G0H6Z9CnleioRqSzCxfBXThvnVRbBUuRU7BdmnfFzbiSgTr+4k0g6e0ffLldnHsV
+# tJtAiZeeNSLuzwhhnqr3MRg7mm+9OtWpzgcWagMW3aw5WP6i8YXHOjH44kG7E3sm
+# WORamtOKROKAD2yvRe2ajz3PyFfxdjoQBlXaWJqCPxKTZoIuB4A1KCk/iQomHEHQ
+# NHDPfjXOOd2YBiMJwXHXM2LutrbAClyFMIUj+7pHDiUK3X2RqzIAwwFBc1AtQnkC
+# TUl6rghNjxZ6kyHnO6GCAyYwggMiBgkqhkiG9w0BCQYxggMTMIIDDwIBATB9MGkx
 # CzAJBgNVBAYTAlVTMRcwFQYDVQQKEw5EaWdpQ2VydCwgSW5jLjFBMD8GA1UEAxM4
 # RGlnaUNlcnQgVHJ1c3RlZCBHNCBUaW1lU3RhbXBpbmcgUlNBNDA5NiBTSEEyNTYg
 # MjAyNSBDQTECEAqA7xhLjfEFgtHEdqeVdGgwDQYJYIZIAWUDBAIBBQCgaTAYBgkq
-# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA1MjAxNTEx
-# MjFaMC8GCSqGSIb3DQEJBDEiBCAVddXpgbD9FPmhFws/72hibfKdrSiDqkZov3Ws
-# 7c0FpTANBgkqhkiG9w0BAQEFAASCAgBhoLg7RHb4SxhtpIbQWtX2wyCtD+anaUEY
-# I0u5aLhCdZof5WtksKkFH+FtDsji8iH6G9gsEHwE0vkJKtwPGeJkN067X+QSkFZ7
-# REQpqZ7eoD+gWliKU0fCC23zXsnbE11PvUtm/QIpYdc8DrN8nAt0f0nrjYuf4hRr
-# 0/9p+NqxXBNfguHuz2P5Am23uFtbh+yCMeFG5uKI838CjtCuoLHY5oFCe95jZ1LF
-# +Nuge9TBY4WBrTnud2fF3GIiZ62iixGMcwMmY0NlvHeFpk4fb4nv5OkN90/iER8G
-# HWH275TFhxUg4Pyh1g5fyK649ebgQQwCkXy9tlKRg069ucd9yjDrW/16NdaF5DhP
-# s7+7NjsUrZLIcoMiJTOJAjMS4nI5lGYNvSOvlYad/yHoX+PvcjwJc4Z2sVrBNd/C
-# xoDYLEkcsCaIC/CWl8LikTtUEQ6AjF2SfEpc9ahxuU5N8pfrQr/GYAKdcQnVKEMa
-# IwIfVNzHVAwZoNdZQKC+frlFs3N3O2WZXHiF7xm5AZPZXf5d8JiHRmRh+a2LXVf+
-# ckblVkIl6JRkX47E+o2p0eTqqQLSoLgR0+Iaoq3uP5lfGunnSje9NZBhHsVI9DNP
-# /k9zKH6OzbERJhDWwb95AnmsxsCKTXS/Xr18CEa159G+ej355EIu3Namy/p9Hfqz
-# JpgkiN4ETQ==
+# hkiG9w0BCQMxCwYJKoZIhvcNAQcBMBwGCSqGSIb3DQEJBTEPFw0yNjA1MjAxOTI5
+# NTdaMC8GCSqGSIb3DQEJBDEiBCBzDo0zyUneLRHknBXQC/Kefzs4P2Yoj0FgDf9C
+# sY0BnDANBgkqhkiG9w0BAQEFAASCAgAR3JuDER4n6szA7hxO4VrzRslb43cWrFow
+# GQ5gVNyvZKaXxb/a+NQKj8fCUBN2zJ20Eb5313HUzP9+O8uFNBz1NR8vyjK/fHcP
+# 7uXShNDt7VcxTfeRoRLwV1rQLQUw0Kct5YU66GZNSGiYYUMhAHh0NryMKSPtJlC8
+# FfA7dzmezYdf7H/xoMgEjvTc5foq37zMncxWgLuBuMXWPmQcI0tkNOHyPi7nhjHb
+# z7Cp83NtLBIS9GufXC3k6dZNYwR2rl4+azEiUnRNLvvaOqu1BvFChR+FoeDKpdPO
+# 2YWsplv5M0WmaKkYX4p+6hWqExBDfWERoOaFHYv5NYKVuXijgeC/uIN3KCw4JZJg
+# uCA0Ib9U7z9HrWzxZUkn+4QxQqGZCxryysAAKFW0k77vcyrGT+zV3DO0CaxQy54I
+# M28UhdDbq1sAi5TOxw1MP6qVTxopHh6ulJJZWSeRGXdcxlDDaE29B9YgcSIQJl2Z
+# 7EeoRzPbe/bgOeLOsXWkC0QolaW3lDbS692xUlFDNyuxmBuYj4KSyRV+e+XCmLi8
+# iM60qOnwynNUUcD3+f/+TZhJutBXlMWJ86HaeKK6vLimu8vsyegX/T99E5OnFyJC
+# XDfwdAdgGH7J+EDptv6lFFmh4u8aXPSS3cem3XZSCXNOZJ+fXE77aUP8F8iVO4wB
+# MkAv4fw1GQ==
 # SIG # End signature block
